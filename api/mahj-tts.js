@@ -1,49 +1,67 @@
-export const config = { runtime: "edge" };
+// /api/mahj-tts.js
 
-export default async function handler(req) {
+export default async function handler(req, res) {
+  // --- CORS HEADERS ---
+  // Allow your production site to call this API
+  res.setHeader('Access-Control-Allow-Origin', 'https://askmahj.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight (OPTIONS) request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { text } = req.body || {};
+
+  if (!text) {
+    return res.status(400).json({ error: 'Missing text' });
+  }
+
   try {
-    if (req.method !== "POST") {
-      return new Response("Use POST", { status: 405 });
-    }
-
-    const { text, voiceId } = await req.json();
-    if (!text) {
-      return new Response("Missing 'text'", { status: 400 });
-    }
-
-    const VOICE = voiceId || process.env.ELEVEN_VOICE_ID;
-
-    const r = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE}`,
+    const elevenRes = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/YOUR_VOICE_ID`,
       {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "xi-api-key": process.env.ELEVEN_API_KEY,
-          "Content-Type": "application/json"
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg',
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_multilingual_v2",
           voice_settings: {
-            stability: 0.7,
+            stability: 0.4,
             similarity_boost: 0.8,
-            style: 0.4
-          }
-        })
+          },
+        }),
       }
     );
 
-    if (!r.ok) {
-      const err = await r.text();
-      return new Response(err || "TTS error", { status: r.status });
+    if (!elevenRes.ok) {
+      const errText = await elevenRes.text();
+      console.error('ElevenLabs error:', elevenRes.status, errText);
+      return res.status(500).json({
+        error: 'ElevenLabs request failed',
+        status: elevenRes.status,
+        details: errText,
+      });
     }
 
-    const audio = await r.arrayBuffer();
-    return new Response(audio, {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" }
-    });
+    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+
+    // Important: CORS + audio on final response
+    res.setHeader('Access-Control-Allow-Origin', 'https://askmahj.com');
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', audioBuffer.length);
+
+    return res.status(200).send(audioBuffer);
   } catch (e) {
-    return new Response("Proxy error", { status: 500 });
+    console.error('Proxy error:', e);
+    return res.status(500).json({ error: 'Proxy error', details: e.message });
   }
 }
